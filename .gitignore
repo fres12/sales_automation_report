@@ -1,0 +1,19 @@
+# Environment variables
+.env
+
+# Node modules
+node_modules/
+
+# Baileys auth
+auth_info_baileys/
+
+# Temporary files
+temp_report*.png
+caption.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+#Excel file
+~$*
