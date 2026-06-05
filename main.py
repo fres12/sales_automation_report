@@ -6,23 +6,10 @@ from datetime import datetime
 import win32com.client as win32
 from PIL import ImageGrab
 
-# Gunakan absolute path berdasarkan lokasi file ini
 WORK_DIR = os.path.dirname(os.path.abspath(__file__))
 EXCEL_FILE_PATH = os.path.join(WORK_DIR, "dashboard_sales.xlsx")
 IMAGE_SAVE_PATH = os.path.join(WORK_DIR, "temp_report.png")
 SHEET_NAME = "Dashboard"
-
-def cek_jadwal():
-    hari_ini = datetime.now().day
-    if hari_ini >= 20:
-        print(f"Tanggal {hari_ini}. Jadwal kirim tiap hari berjalan.")
-        return True
-    elif hari_ini % 2 == 0: 
-        print(f"Tanggal {hari_ini}. Jadwal kirim 2 hari sekali berjalan.")
-        return True
-    else:
-        print(f"Tanggal {hari_ini}. Bukan jadwal pengiriman.")
-        return False
 
 def refresh_dan_screenshot():
     print("Membuka Excel dan menyinkronkan data GCP...")
@@ -36,7 +23,6 @@ def refresh_dan_screenshot():
         excel.CalculateUntilAsyncQueriesDone() # Tunggu data GCP selesai ditarik
         print("Data GCP berhasil ditarik!")
         
-        # Iterasi semua sheet yang namanya mengandung "Dashboard"
         # Iterasi semua sheet yang namanya mengandung "Dashboard"
         # Prioritas: "Dashboard" (exact) dulu, terus "Dashboard 1", "Dashboard 2", dst
         dashboard_sheets = []
@@ -52,20 +38,16 @@ def refresh_dan_screenshot():
             print(f"Memproses sheet: {ws.Name}")
             
             try:
-                # Cari baris dan kolom terakhir yang ada data
-                last_row = ws.Cells.SpecialCells(11).Row  # 11 = xlCellTypeLastCell
+                last_row = ws.Cells.SpecialCells(11).Row
                 last_col = ws.Cells.SpecialCells(11).Column
                 
-                # Validasi: minimal harus ada data (lebih dari 1x1)
                 if last_row < 1 or last_col < 1:
                     print(f"  ⚠️ Sheet {ws.Name} tidak punya data yang valid. Skip.")
                     continue
                 
-                # Activate dan select range
                 ws.Activate()
                 time.sleep(0.3)
                 
-                # Tentukan range dari A1 sampai ke sel terakhir
                 tabel_range = ws.Range(f"A1:{ws.Cells(last_row, last_col).Address}")
                 tabel_range.Select()
                 time.sleep(0.3)
@@ -143,7 +125,6 @@ def trigger_baileys():
     if proses.returncode == 0:
         print("Siklus automasi selesai dengan sukses.")
         
-        # Hapus semua file temp_report_*.png dan caption.txt setelah berhasil dikirim
         import glob
         for file in glob.glob(os.path.join(WORK_DIR, "temp_report_*.png")):
             try:
@@ -163,9 +144,12 @@ def trigger_baileys():
         print("Terjadi kendala pada pengiriman WhatsApp.")
 
 if __name__ == "__main__":
-    if cek_jadwal():
-        refresh_dan_screenshot()
-        # Cek apakah ada file screenshot yang dibuat
-        import glob
-        if glob.glob(os.path.join(WORK_DIR, "temp_report_*.png")):
-            trigger_baileys()
+    print("Memulai proses screenshot dan pengiriman...")
+    refresh_dan_screenshot()
+    
+    # Cek apakah ada file screenshot yang dibuat
+    import glob
+    if glob.glob(os.path.join(WORK_DIR, "temp_report_*.png")):
+        trigger_baileys()
+    else:
+        print("Tidak ada screenshot yang digenerate.")
