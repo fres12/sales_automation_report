@@ -12,7 +12,7 @@ IMAGE_SAVE_PATH = os.path.join(WORK_DIR, "temp_report.png")
 SHEET_NAME = "Dashboard"
 
 def refresh_dan_screenshot():
-    print("Membuka Excel dan menyinkronkan data GCP...")
+    print("Membuka Excel dan menyinkronkan data...")
     excel = win32.DispatchEx("Excel.Application")
     excel.Visible = False
     excel.DisplayAlerts = False
@@ -23,8 +23,6 @@ def refresh_dan_screenshot():
         excel.CalculateUntilAsyncQueriesDone() # Tunggu data GCP selesai ditarik
         print("Data GCP berhasil ditarik!")
         
-        # Iterasi semua sheet yang namanya mengandung "Dashboard"
-        # Prioritas: "Dashboard" (exact) dulu, terus "Dashboard 1", "Dashboard 2", dst
         dashboard_sheets = []
         for ws in wb.Sheets:
             if "Dashboard" in ws.Name:
@@ -51,8 +49,7 @@ def refresh_dan_screenshot():
                 tabel_range = ws.Range(f"A1:{ws.Cells(last_row, last_col).Address}")
                 tabel_range.Select()
                 time.sleep(0.3)
-                
-                # Coba copy picture dengan Copy biasa dulu
+                    
                 try:
                     # Method 1: Gunakan Copy untuk clipboard
                     ws.Range(f"A1:{ws.Cells(last_row, last_col).Address}").Copy()
