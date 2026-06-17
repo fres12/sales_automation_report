@@ -85,6 +85,8 @@ async function connectToWA() {
             if (shouldReconnect) connectToWA();
         } else if (connection === 'open') {
             console.log('\n[V] Terhubung ke WhatsApp!');
+            console.log('⏳ Menunggu socket siap...');
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Tunggu 2 detik
             await kirimReport(sock);
         }
     });
@@ -121,30 +123,44 @@ async function kirimReport(sock) {
         for (const jid of config.grup_tujuan) {
             console.log(`\n=== Mengirim ke grup: ${jid} ===`);
             
-            // Kirim semua screenshot ke grup ini
-            for (const file of files) {
-                const imageBuffer = fs.readFileSync(file);
-                console.log(`  Mengirim screenshot: ${file}...`);
-                await sock.sendMessage(jid, { 
-                    image: imageBuffer
-                });
+            try {
+                // Kirim semua screenshot ke grup ini
+                for (const file of files) {
+                    try {
+                        const imageBuffer = fs.readFileSync(file);
+                        console.log(`  Mengirim screenshot: ${file}...`);
+                        await sock.sendMessage(jid, { 
+                            image: imageBuffer
+                        });
+                        
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                    } catch (err) {
+                        console.error(`  ❌ Error mengirim ${file}: ${err.message}`);
+                    }
+                }
                 
-                await new Promise(resolve => setTimeout(resolve, 5000));
-            }
-            
-            // Kirim caption setelah semua dashboard
-            if (fs.existsSync('caption.txt')) {
-                const captionText = fs.readFileSync('caption.txt', 'utf8');
-                console.log(`  Mengirim caption...`);
-                await sock.sendMessage(jid, { 
-                    text: captionText
-                });
+                // Kirim caption setelah semua dashboard
+                if (fs.existsSync('caption.txt')) {
+                    try {
+                        const captionText = fs.readFileSync('caption.txt', 'utf8');
+                        console.log(`  Mengirim caption...`);
+                        await sock.sendMessage(jid, { 
+                            text: captionText
+                        });
+                        
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                    } catch (err) {
+                        console.error(`  ❌ Error mengirim caption: ${err.message}`);
+                    }
+                }
                 
-                await new Promise(resolve => setTimeout(resolve, 5000));
+                console.log(`✅ Selesai mengirim ke grup: ${jid}`);
+            } catch (err) {
+                console.error(`❌ Error proses grup ${jid}: ${err.message}`);
             }
         }
         
-        console.log('\nSemua report berhasil dikirim!');
+        console.log('\nSemua report selesai diproses!');
         
         // Kirim notifikasi sukses
         try {
@@ -158,7 +174,11 @@ async function kirimReport(sock) {
         process.exit(0); 
         
     } catch (error) {
-        console.error('Terjadi kesalahan saat mengirim pesan:', error);
+        console.error('❌ Terjadi kesalahan saat mengirim pesan:');
+        console.error('   Error:', error.message);
+        if (error.stack) {
+            console.error('   Stack:', error.stack);
+        }
         
         // Kirim notifikasi error
         try {
