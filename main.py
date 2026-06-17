@@ -7,20 +7,24 @@ import win32com.client as win32
 from PIL import ImageGrab
 import glob
 
-WORK_DIR = os.path.dirname(os.path.abspath(__file__))
+# Path untuk file reports (folder File report)
+WORK_DIR = r"C:\Users\fresn\OneDrive - Indosatooredoo Hutchison\File report"
+
+# Path untuk scripts (folder ini - tempat main.py berada)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def find_siso_file():
-    """Cari file SISO OPA di folder Work (abaikan file temporary dengan ~$)"""
-    print("🔄 Mencari file SISO OPA di folder Work...")
+    """Cari file SISO OPA JAVA di folder File report (abaikan file temporary dengan ~$)"""
+    print("🔄 Mencari file SISO OPA JAVA di folder File report...")
     
-    # Cari file yang mengandung "SISO OPA"
-    xlsx_files = glob.glob(os.path.join(WORK_DIR, "*SISO OPA*.xlsx"))
+    # Cari file yang mengandung "SISO OPA JAVA"
+    xlsx_files = glob.glob(os.path.join(WORK_DIR, "*SISO OPA JAVA*.xlsx"))
     
     # Filter: hapus file temporary yang dimulai dengan ~$
     xlsx_files = [f for f in xlsx_files if not os.path.basename(f).startswith("~$")]
     
     if not xlsx_files:
-        raise FileNotFoundError("File SISO OPA tidak ditemukan di folder Work (atau semua file sedang terbuka)")
+        raise FileNotFoundError("File SISO OPA JAVA tidak ditemukan di folder File report (atau semua file sedang terbuka)")
     
     # Ambil file terbaru jika ada multiple
     latest_file = max(xlsx_files, key=os.path.getmtime)
@@ -159,18 +163,20 @@ def refresh_dan_screenshot():
     excel = win32.DispatchEx("Excel.Application")
     excel.Visible = False  # Jalankan di background, tidak tampil di layar
     excel.DisplayAlerts = False
+    wb = None  # Initialize wb agar tidak error di finally block
     
     try:
         print(f"\n🔄 [1/5] Membuka file: {os.path.basename(EXCEL_FILE_PATH)}")
+        print(f"    Path: {EXCEL_FILE_PATH}")
         wb = excel.Workbooks.Open(EXCEL_FILE_PATH)
         print("   ✓ File terbuka di background")
         
-        # print("🔄 [2/5] Melakukan refresh data dari GCP...")
-        # wb.RefreshAll()
+        print("🔄 [2/5] Melakukan refresh data dari GCP...")
+        wb.RefreshAll()
         
-        # print("🔄 [3/5] Menunggu query GCP selesai...")
-        # excel.CalculateUntilAsyncQueriesDone()
-        # print("   ✓ Data GCP berhasil di-refresh!")
+        print("🔄 [3/5] Menunggu query GCP selesai...")
+        excel.CalculateUntilAsyncQueriesDone()
+        print("   ✓ Data GCP berhasil di-refresh!")
         
         print("🔄 [4/5] Membaca dan memproses sheet Caption...")
         
@@ -230,7 +236,8 @@ def refresh_dan_screenshot():
                             img = img.crop(img.getbbox())
                             
                             # Buat nama file sesuai format wa_bot.js: temp_report_1.png, temp_report_2.png, dst
-                            image_path = os.path.join(WORK_DIR, f"temp_report_{screenshot_count}.png")
+                            # Simpan di SCRIPT_DIR agar wa_bot.js bisa menemukannya
+                            image_path = os.path.join(SCRIPT_DIR, f"temp_report_{screenshot_count}.png")
                             img.save(image_path, 'PNG')
                             print(f"   ✓ Screenshot berhasil: {os.path.basename(image_path)} ({img.size})")
                             
@@ -272,10 +279,14 @@ def refresh_dan_screenshot():
         
     finally:
         try:
-            wb.Save()
+            if wb:  # Check apakah wb sudah berhasil dibuka
+                wb.Save()
         except:
             pass  # File mungkin read-only, ignore error
-        wb.Close()
+        
+        if wb:  # Check sebelum close
+            wb.Close()
+        
         excel.Quit()
 
 def send_wa_report():
@@ -283,10 +294,10 @@ def send_wa_report():
     try:
         print("\n🔄 Menjalankan WA Bot untuk mengirim screenshot...")
         
-        # Jalankan wa_bot.js menggunakan Node.js
+        # Jalankan wa_bot.js menggunakan Node.js dari SCRIPT_DIR (tempat wa_bot.js berada)
         result = subprocess.run(
-            ["node", os.path.join(WORK_DIR, "wa_bot.js")],
-            cwd=WORK_DIR,
+            ["node", os.path.join(SCRIPT_DIR, "wa_bot.js")],
+            cwd=SCRIPT_DIR,
             capture_output=True,
             text=True,
             timeout=300  # Timeout 5 menit
@@ -296,7 +307,7 @@ def send_wa_report():
             print("✅ WA Bot selesai!")
             if result.stdout:
                 print(result.stdout)
-            
+         
             # Hapus file screenshot setelah berhasil dikirim
             cleanup_screenshot_files()
         else:
@@ -317,7 +328,8 @@ def send_wa_report():
 def save_caption_to_file(caption_text):
     """Simpan caption text ke file caption.txt"""
     try:
-        caption_file = os.path.join(WORK_DIR, "caption.txt")
+        # Simpan di SCRIPT_DIR agar wa_bot.js bisa menemukannya
+        caption_file = os.path.join(SCRIPT_DIR, "caption.txt")
         
         if caption_text and caption_text.strip():
             with open(caption_file, 'w', encoding='utf-8') as f:
@@ -338,14 +350,14 @@ def cleanup_screenshot_files():
     try:
         print("\n🗑️ Membersihkan file screenshot temporary...")
         
-        # Hapus file temp_report_*.png
-        screenshot_files = glob.glob(os.path.join(WORK_DIR, "temp_report_*.png"))
+        # Hapus file temp_report_*.png dari SCRIPT_DIR
+        screenshot_files = glob.glob(os.path.join(SCRIPT_DIR, "temp_report_*.png"))
         for file in screenshot_files:
             os.remove(file)
             print(f"   ✓ Dihapus: {os.path.basename(file)}")
         
         # Hapus file caption.txt jika ada
-        caption_file = os.path.join(WORK_DIR, "caption.txt")
+        caption_file = os.path.join(SCRIPT_DIR, "caption.txt")
         if os.path.exists(caption_file):
             os.remove(caption_file)
             print(f"   ✓ Dihapus: caption.txt")
