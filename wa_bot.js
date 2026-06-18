@@ -1,6 +1,7 @@
 const pino = require('pino');
 const fs = require('fs');
 const qrcode = require('qrcode-terminal');
+const sharp = require('sharp');
 require('dotenv').config();
 
 const CONFIG_FILE = 'config.json';
@@ -127,11 +128,33 @@ async function kirimReport(sock) {
                 // Kirim semua screenshot ke grup ini
                 for (const file of files) {
                     try {
-                        const imageBuffer = fs.readFileSync(file);
-                        console.log(`  Mengirim screenshot: ${file}...`);
+                        console.log(`  Memproses & mengirim screenshot: ${file}...`);
+                        
+                        // OPTIMASI KUALITAS GAMBAR SEBELUM DIKIRIM
+                        // Gunakan JPEG dengan quality tinggi - lebih optimal untuk WhatsApp autosave ke galeri iPhone
+                        let imageBuffer = fs.readFileSync(file);
+                        
+                        // Proses gambar dengan sharp untuk optimasi terbaik
+                        // JPEG quality 95 memberikan kualitas sangat tinggi dengan file size yang reasonable
+                        // Ini lebih dioptimalkan untuk WhatsApp daripada PNG
+                        const optimizedBuffer = await sharp(imageBuffer)
+                            .jpeg({ 
+                                quality: 95,            // Kualitas sangat tinggi untuk JPEG
+                                progressive: true,      // Progressive JPEG untuk loading lebih smooth
+                                optimizeScans: true,    // Optimasi scan untuk performa lebih baik
+                                mozjpeg: true           // Gunakan mozjpeg untuk kompresi lebih baik
+                            })
+                            .toBuffer();
+                        
                         await sock.sendMessage(jid, { 
-                            image: imageBuffer
+                            image: optimizedBuffer,
+                            caption: undefined  // Jangan tambah caption di sini, nanti dikirim terpisah
                         });
+                        
+                        // Tampilkan info file size untuk referensi
+                        const originalSize = (imageBuffer.length / 1024).toFixed(2);
+                        const optimizedSize = (optimizedBuffer.length / 1024).toFixed(2);
+                        console.log(`    ✓ Ukuran: ${originalSize}KB → ${optimizedSize}KB (setelah optimasi)`);
                         
                         await new Promise(resolve => setTimeout(resolve, 5000));
                     } catch (err) {

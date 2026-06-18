@@ -4,7 +4,7 @@ import time
 import subprocess
 from datetime import datetime
 import win32com.client as win32
-from PIL import ImageGrab
+from PIL import ImageGrab, ImageEnhance
 import glob
 
 # Path untuk file reports (folder File report)
@@ -235,11 +235,30 @@ def refresh_dan_screenshot():
                             screenshot_count += 1
                             img = img.crop(img.getbbox())
                             
+                            # OPTIMASI KUALITAS GAMBAR UNTUK WHATSAPP
+                            # 1. Tingkatkan sharpness untuk ketajaman lebih baik
+                            enhancer_sharpness = ImageEnhance.Sharpness(img)
+                            img = enhancer_sharpness.enhance(1.5)  # 50% lebih sharp
+                            
+                            # 2. Tingkatkan contrast untuk detail lebih jelas
+                            enhancer_contrast = ImageEnhance.Contrast(img)
+                            img = enhancer_contrast.enhance(1.2)  # 20% lebih kontras
+                            
+                            # 3. Tingkatkan brightness sedikit untuk mencegah area gelap
+                            enhancer_brightness = ImageEnhance.Brightness(img)
+                            img = enhancer_brightness.enhance(1.05)  # 5% lebih terang
+                            
                             # Buat nama file sesuai format wa_bot.js: temp_report_1.png, temp_report_2.png, dst
                             # Simpan di SCRIPT_DIR agar wa_bot.js bisa menemukannya
                             image_path = os.path.join(SCRIPT_DIR, f"temp_report_{screenshot_count}.png")
-                            img.save(image_path, 'PNG')
-                            print(f"   ✓ Screenshot berhasil: {os.path.basename(image_path)} ({img.size})")
+                            
+                            # SAVE DENGAN OPTIMASI UNTUK WHATSAPP:
+                            # Gunakan format JPEG dengan quality tinggi - lebih dioptimalkan untuk WhatsApp
+                            # daripada PNG yang bisa over-compressed dan menyebabkan blur di autosave galeri iPhone
+                            # Quality 95 = kualitas sangat tinggi dengan file size yang masih reasonable
+                            img_rgb = img.convert('RGB')  # JPEG memerlukan RGB, bukan RGBA
+                            img_rgb.save(image_path, 'JPEG', quality=95, optimize=True)
+                            print(f"   ✓ Screenshot berhasil: {os.path.basename(image_path)} ({img_rgb.size})")
                             
                             excel.SendKeys('{ESCAPE}')
                         else:
