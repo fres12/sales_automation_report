@@ -95,7 +95,20 @@ async function connectToWA() {
 
 async function kirimReport(sock) {
     try {
-        const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+        // Baca send_config.json untuk mendapatkan group IDs dan caption
+        let sendConfig = {};
+        try {
+            sendConfig = JSON.parse(fs.readFileSync('send_config.json', 'utf8'));
+        } catch (err) {
+            console.log('[!] send_config.json tidak ditemukan, menggunakan config.json sebagai fallback...');
+            // Fallback ke config.json jika send_config.json tidak ada
+            sendConfig = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+        }
+        
+        const groupIds = Array.isArray(sendConfig.group_ids) ? sendConfig.group_ids : [sendConfig.group_ids];
+        const captionText = sendConfig.caption || '';
+        
+        console.log(`\n📍 Target grup: ${groupIds.join(', ')}`);
         
         // Cari semua file temp_report_*.png
         const files = fs.readdirSync('.')
@@ -121,7 +134,7 @@ async function kirimReport(sock) {
         }
         
         // Iterasi setiap grup tujuan
-        for (const jid of config.grup_tujuan) {
+        for (const jid of groupIds) {
             console.log(`\n=== Mengirim ke grup: ${jid} ===`);
             
             try {
@@ -131,30 +144,25 @@ async function kirimReport(sock) {
                         console.log(`  Memproses & mengirim screenshot: ${file}...`);
                         
                         // OPTIMASI KUALITAS GAMBAR SEBELUM DIKIRIM
-                        // Gunakan JPEG dengan quality tinggi - lebih optimal untuk WhatsApp autosave ke galeri iPhone
                         let imageBuffer = fs.readFileSync(file);
                         
-                        // Proses gambar dengan sharp untuk optimasi terbaik
-                        // JPEG quality 95 memberikan kualitas sangat tinggi dengan file size yang reasonable
-                        // Ini lebih dioptimalkan untuk WhatsApp daripada PNG
                         const optimizedBuffer = await sharp(imageBuffer)
                             .jpeg({ 
-                                quality: 95,            // Kualitas sangat tinggi untuk JPEG
-                                progressive: true,      // Progressive JPEG untuk loading lebih smooth
-                                optimizeScans: true,    // Optimasi scan untuk performa lebih baik
-                                mozjpeg: true           // Gunakan mozjpeg untuk kompresi lebih baik
+                                quality: 95,
+                                progressive: true,
+                                optimizeScans: true,
+                                mozjpeg: true
                             })
                             .toBuffer();
                         
                         await sock.sendMessage(jid, { 
                             image: optimizedBuffer,
-                            caption: undefined  // Jangan tambah caption di sini, nanti dikirim terpisah
+                            caption: undefined
                         });
                         
-                        // Tampilkan info file size untuk referensi
                         const originalSize = (imageBuffer.length / 1024).toFixed(2);
                         const optimizedSize = (optimizedBuffer.length / 1024).toFixed(2);
-                        console.log(`    ✓ Ukuran: ${originalSize}KB → ${optimizedSize}KB (setelah optimasi)`);
+                        console.log(`    ✓ Ukuran: ${originalSize}KB → ${optimizedSize}KB`);
                         
                         await new Promise(resolve => setTimeout(resolve, 5000));
                     } catch (err) {
@@ -163,9 +171,8 @@ async function kirimReport(sock) {
                 }
                 
                 // Kirim caption setelah semua dashboard
-                if (fs.existsSync('caption.txt')) {
+                if (captionText && captionText.trim()) {
                     try {
-                        const captionText = fs.readFileSync('caption.txt', 'utf8');
                         console.log(`  Mengirim caption...`);
                         await sock.sendMessage(jid, { 
                             text: captionText
@@ -187,7 +194,7 @@ async function kirimReport(sock) {
         
         // Kirim notifikasi sukses
         try {
-            const successMsg = `✅ SUKSES: Report telah dikirim ke ${config.grup_tujuan.length} grup.\n⏰ Waktu: ${new Date().toLocaleString('id-ID')}`;
+            const successMsg = `✅ SUKSES: Report telah dikirim ke ${groupIds.length} grup.\n⏰ Waktu: ${new Date().toLocaleString('id-ID')}`;
             await sock.sendMessage(NOTIF_NUMBER, { text: successMsg });
             console.log('Notifikasi sukses terkirim ke admin.');
         } catch (err) {
