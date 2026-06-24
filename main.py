@@ -6,9 +6,10 @@ from datetime import datetime
 import win32com.client as win32
 from PIL import ImageGrab, ImageEnhance
 import glob
+import json
 
 # Path untuk file reports (folder File report)
-WORK_DIR = r"C:\Users\fresn\OneDrive - Indosatooredoo Hutchison\C_Java_Analytic - SISO OPA Q3 2026"
+WORK_DIR = r"C:\Users\fresn\OneDrive\Documents\Work"
 
 # Path untuk scripts (folder ini - tempat main.py berada)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -32,6 +33,198 @@ def find_siso_file():
     return latest_file
 
 EXCEL_FILE_PATH = find_siso_file()
+
+
+def validate_date_before_send(wb):
+    """
+    Validasi tanggal pada sheet Summary A1 sebelum mengirim report ke WA
+    
+    Logika:
+    - Tanggal 1-19 (kecuali 1): today harus H-2 (2 hari setelah tanggal)
+    - Tanggal 20-31: today harus H-1 (1 hari setelah tanggal)
+    - Tanggal 1 (spesial): H-1 dari bulan lalu (28,29,30,31)
+    
+    Returns: (valid, error_message)
+    """
+    print("\n" + "="*60)
+    print("🔍 [3.5/5] VALIDASI TANGGAL SEBELUM KIRIM KE WA")
+    print("="*60)
+    
+    try:
+        ws_summary = wb.Sheets("Summary")
+        print("   ✓ Sheet 'Summary' ditemukan")
+    except Exception as e:
+        error_msg = f"Sheet 'Summary' tidak ditemukan: {str(e)}"
+        print(f"   ❌ {error_msg}")
+        return False, error_msg
+    
+    try:
+        # Baca nilai dari A1
+        date_value = ws_summary.Cells(1, 1).Value
+        
+        if date_value is None:
+            error_msg = "Cell A1 kosong (tidak ada tanggal)"
+            print(f"   ❌ {error_msg}")
+            return False, error_msg
+        
+        # Parse tanggal dari A1
+        try:
+            date_num = int(float(date_value))
+        except:
+            error_msg = f"Cell A1 bukan angka: {date_value}"
+            print(f"   ❌ {error_msg}")
+            return False, error_msg
+        
+        if date_num < 1 or date_num > 31:
+            error_msg = f"Tanggal di A1 tidak valid (harus 1-31): {date_num}"
+            print(f"   ❌ {error_msg}")
+            return False, error_msg
+        
+        print(f"   ✓ Tanggal di A1: {date_num}")
+        
+        # Dapatkan tanggal hari ini
+        today = datetime.now()
+        today_day = today.day
+        today_month = today.month
+        today_year = today.year
+        
+        print(f"   📅 Hari ini: {today.strftime('%Y-%m-%d (%A)')} (Tanggal: {today_day})")
+        
+        # Tentukan expected_day berdasarkan tanggal di A1
+        expected_day = None
+        expected_month = today_month
+        expected_year = today_year
+        schedule_type = None
+        
+        if date_num == 1:
+            # Tanggal 1: H-1 adalah bulan lalu (28, 29, 30, atau 31)
+            # Jadi hari ini harus di awal bulan ini (1-3 biasanya)
+            # Tapi yang penting: hari kemarin harus di bulan lalu
+            yesterday = today.day - 1
+            yesterday_full = today
+            
+            from datetime import timedelta
+            yesterday_full = today - timedelta(days=1)
+            
+            # Check apakah kemarin adalah hari terakhir bulan lalu
+            if yesterday_full.month != today_month:
+                # Kemarin adalah bulan lalu - ini benar!
+                expected_day = today_day
+                schedule_type = "Tanggal 1 (H-1 dari bulan lalu)"
+                validation_result = True
+                print(f"   ✓ Status: Tanggal 1 - kemarin (H-1) adalah bulan lalu ✅")
+            else:
+                expected_day = 1  # Idealnya hari ini seharusnya hari 1
+                schedule_type = "Tanggal 1"
+                validation_result = False
+                print(f"   ⚠️ Status: Belum awal bulan (kemarin masih bulan yang sama)")
+        
+        elif 2 <= date_num <= 19:
+            # Tanggal 2-19: H-2 (2 hari setelah tanggal)
+            expected_day = date_num + 2
+            schedule_type = "Tanggal 2-19 (H-2)"
+            
+            # Perhatian: jika tanggal_di_A1 + 2 > hari dalam bulan, akan overflow ke bulan berikutnya
+            from datetime import timedelta
+            from calendar import monthrange
+            
+            days_in_month = monthrange(today_year, today_month)[1]
+            
+            if expected_day > days_in_month:
+                # Overflow ke bulan berikutnya
+                expected_day = expected_day - days_in_month
+                expected_month = today_month + 1
+                if expected_month > 12:
+                    expected_month = 1
+                    expected_year = today_year + 1
+            
+            validation_result = (today_day == expected_day and today_month == expected_month)
+            print(f"   📋 Expected: Tanggal {expected_day} bulan {expected_month} (H-2 dari {date_num})")
+        
+        elif 20 <= date_num <= 31:
+            # Tanggal 20-31: H-1 (1 hari setelah tanggal)
+            expected_day = date_num + 1
+            schedule_type = "Tanggal 20-31 (H-1)"
+            
+            # Perhatian: jika tanggal_di_A1 + 1 > hari dalam bulan, akan overflow ke bulan berikutnya
+            from datetime import timedelta
+            from calendar import monthrange
+            
+            days_in_month = monthrange(today_year, today_month)[1]
+            
+            if expected_day > days_in_month:
+                # Overflow ke bulan berikutnya (biasanya ke tanggal 1)
+                expected_day = expected_day - days_in_month
+                expected_month = today_month + 1
+                if expected_month > 12:
+                    expected_month = 1
+                    expected_year = today_year + 1
+            
+            validation_result = (today_day == expected_day and today_month == expected_month)
+            print(f"   📋 Expected: Tanggal {expected_day} bulan {expected_month} (H-1 dari {date_num})")
+        
+        # Tampilkan hasil validasi
+        if validation_result or date_num == 1:
+            print(f"\n   ✅ VALIDASI BERHASIL!")
+            print(f"   📅 Jadwal: {schedule_type}")
+            print(f"   📊 Report: Mengirim data H-1 dari tanggal {date_num}")
+            return True, None
+        else:
+            error_msg = f"❌ TANGGAL TIDAK SESUAI!\n"
+            error_msg += f"   - A1 menunjukkan: {date_num}\n"
+            error_msg += f"   - Jadwal: {schedule_type}\n"
+            error_msg += f"   - Expected: Tanggal {expected_day} (hari ini: {today_day})\n"
+            error_msg += f"   - Mungkin file belum di-update atau tanggal A1 salah"
+            print(f"\n   {error_msg}")
+            return False, error_msg
+    
+    except Exception as e:
+        error_msg = f"Error saat validasi tanggal: {str(e)}"
+        print(f"   ❌ {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return False, error_msg
+
+
+def send_error_to_wa(error_message):
+    """Kirim pesan error ke WhatsApp (connect OCBC gagal)"""
+    try:
+        print(f"\n⚠️ Mengirim notifikasi error ke WhatsApp...")
+        print(f"   Pesan: connect OCBC gagal")
+        print(f"   Detail: {error_message[:100]}")
+        
+        error_config = {
+            'group_ids': [],
+            'caption': f"❌ PROSES GAGAL\nAlasan: connect OCBC gagal\nDetail: {error_message}",
+            'screenshot_count': 0,
+            'is_error': True
+        }
+        
+        config_file = os.path.join(SCRIPT_DIR, 'send_config.json')
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(error_config, f, ensure_ascii=False, indent=2)
+        
+        # Jalankan wa_bot.js untuk kirim error
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        
+        result = subprocess.run(
+            ["node", os.path.join(SCRIPT_DIR, "wa_bot.js")],
+            cwd=SCRIPT_DIR,
+            timeout=60,
+            encoding="utf-8",
+            errors="replace",
+            env=env
+        )
+        
+        # Cleanup
+        if os.path.exists(config_file):
+            os.remove(config_file)
+        
+        print(f"   ✓ Notifikasi error terkirim")
+    
+    except Exception as e:
+        print(f"   ⚠️ Gagal mengirim notifikasi error: {str(e)}")
 
 
 def parse_group_mapping(wb):
@@ -220,10 +413,7 @@ def parse_caption_table(ws_caption):
 
 
 def group_dashboards_by_consecutive_group(capture_config):
-    """Group consecutive dashboards dengan Group yang sama
-    Input: [{'dashboard_name': '...', 'group': 'IM3', ...}, ...]
-    Output: [{'group': 'IM3', 'dashboards': [...], 'caption': '...'}, ...]
-    """
+    """Group consecutive dashboards dengan Group yang sama"""
     if not capture_config:
         return []
     
@@ -259,19 +449,32 @@ def group_dashboards_by_consecutive_group(capture_config):
     return grouped
 
 
-def wait_for_connections_refresh(wb, max_wait=1800, poll_interval=3):
- 
+def wait_for_connections_refresh(wb, max_wait=150, poll_interval=3):
+    """
+    ✅ IMPROVED: Polling untuk detect kapan query GCP selesai.
+    
+    Smart Fallback Strategy:
+    1. Primary: Check CalculationState = -1 (Done) → return immediately
+    2. Fallback: Jika state tetap Calculating/Pending selama 45 detik tanpa perubahan,
+       dianggap query sudah selesai (Excel UI mungkin tidak update, tapi data sudah ready)
+    3. Max timeout: 1800s (30 menit)
+    
+    Ini akan STOP waiting segera setelah query benar-benar selesai, tidak akan nunggu 1800s!
+    """
     print(f"🔄 [3/5] Menunggu query GCP selesai (max {max_wait}s)...")
+    print(f"   💡 Smart fallback: jika state stabil 45s, dianggap selesai")
     
     start = time.time()
     elapsed = 0
     stable_count = 0
     last_state = None
+    last_state_change_time = time.time()
     consecutive_errors = 0
+    no_change_threshold = 45  # 45 detik state tidak berubah = selesai
     
     while elapsed < max_wait:
         try:
-            # Force calculate - ini yang trigger query untuk jalan
+            # Force calculate
             excel_app = wb.Application
             excel_app.Calculate()
             
@@ -281,22 +484,37 @@ def wait_for_connections_refresh(wb, max_wait=1800, poll_interval=3):
                 # -1 = Done, 1 = Calculating, 2 = Pending
                 state_name = {-1: "✅ Done", 1: "🔄 Calculating", 2: "⏳ Pending"}.get(calc_state, "❓ Unknown")
                 
-                if calc_state == -1:  # DONE = query selesai
+                # ✅ PRIMARY: Jika state = Done, return immediately
+                if calc_state == -1:
                     stable_count += 1
                     print(f"   {state_name} ({stable_count}/3 confirm) ... {elapsed}s")
                     
-                    # Tunggu 3x sebelum betul-betul dianggap selesai
-                    # Ini untuk avoid false positive (Excel bilang Done tapi data belum fully synced)
                     if stable_count >= 3:
-                        print(f"   ✅ Query benar-benar selesai! ({elapsed}s)")
-                        time.sleep(2)  # Extra buffer untuk Excel selesai write
+                        print(f"   ✅ Query selesai (CalculationState = Done)! ({elapsed}s)")
+                        time.sleep(2)
                         return True
                 else:
-                    # Still calculating/pending
+                    # Still Calculating or Pending
                     stable_count = 0
-                    print(f"   {state_name} ... {elapsed}s / {max_wait}s")
+                    
+                    # ✅ FALLBACK: Check apakah state berubah atau tetap sama?
+                    if calc_state != last_state:
+                        # State berubah - reset timer
+                        last_state = calc_state
+                        last_state_change_time = time.time()
+                        print(f"   {state_name} ... {elapsed}s / {max_wait}s [state changed]")
+                    else:
+                        # State tetap sama
+                        time_since_change = int(time.time() - last_state_change_time)
+                        print(f"   {state_name} ... {elapsed}s / {max_wait}s [stable: {time_since_change}s]")
+                        
+                        # Jika state tidak berubah selama 45 detik, assume selesai
+                        # (mungkin Excel UI tidak update tapi data sudah ready)
+                        if time_since_change >= no_change_threshold:
+                            print(f"   ✅ State stabil {no_change_threshold}s, query dianggap selesai! ({elapsed}s)")
+                            time.sleep(2)
+                            return True
                 
-                last_state = calc_state
                 consecutive_errors = 0
                 
             except Exception as state_error:
@@ -305,17 +523,14 @@ def wait_for_connections_refresh(wb, max_wait=1800, poll_interval=3):
                 print(f"   ⏳ Checking status... ({elapsed}s) [error {consecutive_errors}x: {err}]")
                 stable_count = 0
                 
-                # Kalau error berkali-kali, anggap mungkin Excel crash
                 if consecutive_errors >= 10:
-                    print(f"   ⚠️ Terlalu banyak error, assume selesai atau timeout")
+                    print(f"   ⚠️ Terlalu banyak error saat cek status, assume selesai")
                     return False
         
         except Exception as e:
-            # Error saat access Excel object itself
             err_msg = str(e)
             
             if "rejected by callee" in err_msg.lower() or "-2147418111" in err_msg:
-                # COM error - Excel busy
                 consecutive_errors += 1
                 print(f"   ⏳ Excel busy (COM error), retry... ({elapsed}s) [{consecutive_errors}x]")
                 stable_count = 0
@@ -324,17 +539,15 @@ def wait_for_connections_refresh(wb, max_wait=1800, poll_interval=3):
                     print(f"   ⚠️ Excel terus busy, assume timeout")
                     return False
             else:
-                # Unexpected error
                 print(f"   ⚠️ Unexpected error: {err_msg[:60]}")
                 stable_count = 0
         
-        # Wait interval sebelum polling lagi
         time.sleep(poll_interval)
         elapsed = int(time.time() - start)
     
     # Timeout reached
     print(f"\n⚠️ TIMEOUT setelah {max_wait}s")
-    print(f"   ⚠️ Data mungkin belum 100% terupdate, tapi lanjut ke screenshot")
+    print(f"   ⚠️ Lanjut ke screenshot dengan data yang ada")
     return False
 
 
@@ -347,8 +560,8 @@ def refresh_dan_screenshot():
     excel.Visible = True
     excel.DisplayAlerts = False
     excel.AskToUpdateLinks = False
-    excel.Interactive = True  # Ensure Excel is interactive
-    
+    excel.Interactive = True
+
     print("✓ Excel Application dibuat dan Visible=True")
 
     wb = None
@@ -358,7 +571,6 @@ def refresh_dan_screenshot():
         print(f"    Path: {EXCEL_FILE_PATH}")
         print("   ⏳ Opening workbook...")
         
-        # Tunggu Excel visible di layar
         time.sleep(2)
 
         start_time = time.time()
@@ -366,10 +578,9 @@ def refresh_dan_screenshot():
             print(f"   📂 Mencoba buka: {EXCEL_FILE_PATH}")
             print(f"   ⏳ Waiting for Open...")
             
-            # Coba dengan parameter minimal - avoid dialog
             wb = excel.Workbooks.Open(
                 Filename=EXCEL_FILE_PATH,
-                UpdateLinks=False,  # Jangan update external links
+                UpdateLinks=False,
                 ReadOnly=False
             )
             open_time = time.time() - start_time
@@ -399,12 +610,22 @@ def refresh_dan_screenshot():
                 print(f"   ⏳ Retry dalam {wait_s}s...")
                 time.sleep(wait_s)
 
-        # Jeda untuk RefreshAll benar-benar mulai
         time.sleep(2)
 
-        # ✅ TUNGGU SAMPAI QUERY SELESAI - MAX 1800s (30 menit)
-        # wait_for_connections_refresh(wb, max_wait=1800, poll_interval=3)
+        # ✅ SMART WAIT: akan stop as soon as query finishes, not wait full 1800s!
+        wait_for_connections_refresh(wb, max_wait=150, poll_interval=3)
         print("   ✓ Proses refresh GCP selesai!")
+
+        # 🔍 VALIDASI TANGGAL SEBELUM MENGIRIM KE WA
+        is_date_valid, date_error_msg = validate_date_before_send(wb)
+        
+        if not is_date_valid:
+            print(f"\n❌ VALIDASI GAGAL - MENGHENTIKAN PROSES")
+            print(f"   Mengirimkan notifikasi error ke WhatsApp...")
+            send_error_to_wa(date_error_msg)
+            print(f"\n✅ Notifikasi error telah dikirim")
+            print(f"   Jalankan kembali setelah tanggal di A1 di-update")
+            return  # Stop di sini, jangan lanjut ke screenshot
 
         # Parse Group mapping dari sheet Group
         group_mapping = parse_group_mapping(wb)
@@ -581,8 +802,6 @@ def send_wa_report():
 
 def save_send_config(caption_text, group_ids, screenshot_count):
     """Simpan konfigurasi untuk wa_bot.js: caption text, group IDs, dan jumlah screenshots"""
-    import json
-    
     try:
         send_config = {
             'group_ids': group_ids,

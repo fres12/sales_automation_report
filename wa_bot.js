@@ -107,6 +107,23 @@ async function kirimReport(sock) {
         
         const groupIds = Array.isArray(sendConfig.group_ids) ? sendConfig.group_ids : [sendConfig.group_ids];
         const captionText = sendConfig.caption || '';
+        const isError = sendConfig.is_error || false;
+        
+        // 🔴 CEK JIKA INI ERROR MESSAGE
+        if (isError) {
+            console.log('\n[⚠️] MODE ERROR DETECTED - Mengirim notifikasi error');
+            console.log(`📝 Pesan: ${captionText.substring(0, 100)}...`);
+            
+            try {
+                // Kirim error message ke admin
+                await sock.sendMessage(NOTIF_NUMBER, { text: captionText });
+                console.log('✅ Notifikasi error terkirim ke admin');
+            } catch (err) {
+                console.log('❌ Gagal mengirim notifikasi error:', err.message);
+            }
+            
+            process.exit(1);
+        }
         
         console.log(`\n📍 Target grup: ${groupIds.join(', ')}`);
         
