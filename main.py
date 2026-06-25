@@ -40,9 +40,9 @@ def validate_date_before_send(wb):
     Validasi tanggal pada sheet Summary A1 sebelum mengirim report ke WA
     
     Logika:
-    - Tanggal 1-19 (kecuali 1): today harus H-2 (2 hari setelah tanggal)
+    - Tanggal 2-19: today harus H-1 (1 hari setelah tanggal)
     - Tanggal 20-31: today harus H-1 (1 hari setelah tanggal)
-    - Tanggal 1 (spesial): H-1 dari bulan lalu (28,29,30,31)
+    - Tanggal 1 (spesial): H-1 dari bulan lalu (28, 29, 30, 31 - flexible)
     
     Returns: (valid, error_message)
     """
@@ -95,61 +95,37 @@ def validate_date_before_send(wb):
         expected_month = today_month
         expected_year = today_year
         schedule_type = None
+        validation_result = False
         
         if date_num == 1:
             # Tanggal 1: H-1 adalah bulan lalu (28, 29, 30, atau 31)
-            # Jadi hari ini harus di awal bulan ini (1-3 biasanya)
-            # Tapi yang penting: hari kemarin harus di bulan lalu
-            yesterday = today.day - 1
-            yesterday_full = today
-            
+            # Check apakah kemarin adalah hari terakhir bulan lalu
             from datetime import timedelta
             yesterday_full = today - timedelta(days=1)
             
-            # Check apakah kemarin adalah hari terakhir bulan lalu
             if yesterday_full.month != today_month:
                 # Kemarin adalah bulan lalu - ini benar!
-                expected_day = today_day
-                schedule_type = "Tanggal 1 (H-1 dari bulan lalu)"
-                validation_result = True
-                print(f"   ✓ Status: Tanggal 1 - kemarin (H-1) adalah bulan lalu ✅")
+                # Accept tanggal 28-31 dari bulan lalu
+                yesterday_day = yesterday_full.day
+                if 28 <= yesterday_day <= 31:
+                    validation_result = True
+                    schedule_type = f"Tanggal 1 (H-1 dari bulan lalu: tanggal {yesterday_day})"
+                    print(f"   ✓ Status: Tanggal 1 - kemarin (H-1) adalah {yesterday_day} bulan lalu ✅")
+                else:
+                    validation_result = False
+                    schedule_type = "Tanggal 1"
+                    print(f"   ⚠️ Status: Kemarin bulan lalu tapi bukan 28-31 (tanggal {yesterday_day})")
             else:
-                expected_day = 1  # Idealnya hari ini seharusnya hari 1
-                schedule_type = "Tanggal 1"
                 validation_result = False
+                schedule_type = "Tanggal 1"
                 print(f"   ⚠️ Status: Belum awal bulan (kemarin masih bulan yang sama)")
         
-        elif 2 <= date_num <= 19:
-            # Tanggal 2-19: H-2 (2 hari setelah tanggal)
-            expected_day = date_num + 2
-            schedule_type = "Tanggal 2-19 (H-2)"
-            
-            # Perhatian: jika tanggal_di_A1 + 2 > hari dalam bulan, akan overflow ke bulan berikutnya
-            from datetime import timedelta
-            from calendar import monthrange
-            
-            days_in_month = monthrange(today_year, today_month)[1]
-            
-            if expected_day > days_in_month:
-                # Overflow ke bulan berikutnya
-                expected_day = expected_day - days_in_month
-                expected_month = today_month + 1
-                if expected_month > 12:
-                    expected_month = 1
-                    expected_year = today_year + 1
-            
-            validation_result = (today_day == expected_day and today_month == expected_month)
-            print(f"   📋 Expected: Tanggal {expected_day} bulan {expected_month} (H-2 dari {date_num})")
-        
-        elif 20 <= date_num <= 31:
-            # Tanggal 20-31: H-1 (1 hari setelah tanggal)
+        elif 2 <= date_num <= 31:
+            # Tanggal 2-31: H-1 (1 hari setelah tanggal) - semua H-1
             expected_day = date_num + 1
-            schedule_type = "Tanggal 20-31 (H-1)"
+            schedule_type = f"Tanggal {date_num} (H-1)"
             
-            # Perhatian: jika tanggal_di_A1 + 1 > hari dalam bulan, akan overflow ke bulan berikutnya
-            from datetime import timedelta
             from calendar import monthrange
-            
             days_in_month = monthrange(today_year, today_month)[1]
             
             if expected_day > days_in_month:
@@ -164,7 +140,7 @@ def validate_date_before_send(wb):
             print(f"   📋 Expected: Tanggal {expected_day} bulan {expected_month} (H-1 dari {date_num})")
         
         # Tampilkan hasil validasi
-        if validation_result or date_num == 1:
+        if validation_result:
             print(f"\n   ✅ VALIDASI BERHASIL!")
             print(f"   📅 Jadwal: {schedule_type}")
             print(f"   📊 Report: Mengirim data H-1 dari tanggal {date_num}")
@@ -173,7 +149,10 @@ def validate_date_before_send(wb):
             error_msg = f"❌ TANGGAL TIDAK SESUAI!\n"
             error_msg += f"   - A1 menunjukkan: {date_num}\n"
             error_msg += f"   - Jadwal: {schedule_type}\n"
-            error_msg += f"   - Expected: Tanggal {expected_day} (hari ini: {today_day})\n"
+            if date_num == 1:
+                error_msg += f"   - Expected: Hari ini harus awal bulan, kemarin harus 28-31 bulan lalu\n"
+            else:
+                error_msg += f"   - Expected: Tanggal {expected_day} (hari ini: {today_day})\n"
             error_msg += f"   - Mungkin file belum di-update atau tanggal A1 salah"
             print(f"\n   {error_msg}")
             return False, error_msg

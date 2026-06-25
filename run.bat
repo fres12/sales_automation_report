@@ -14,16 +14,16 @@ python main.py
 if %errorlevel% neq 0 (
     echo.
     echo ========================================
-    echo Error occurred! Press any key to exit...
+    echo Error occurred! Closing in 5 seconds...
     echo ========================================
-    pause
+    timeout /t 5 /nobreak >nul
     exit /b %errorlevel%
 ) else (
     echo.
     echo ========================================
-    echo Application completed successfully!
+    echo Application completed successfully! Closing in 5 seconds...
     echo ========================================
-    pause
+    timeout /t 5 /nobreak >nul
 )
 
 endlocal
