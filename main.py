@@ -4,7 +4,7 @@ import time
 import subprocess
 from datetime import datetime
 import win32com.client as win32
-from PIL import ImageGrab, ImageEnhance
+from PIL import ImageGrab
 import glob
 import json
 
@@ -449,6 +449,97 @@ def group_dashboards_by_consecutive_group(capture_config):
     return grouped
 
 
+def take_all_screenshots(wb, excel, group_mapping, all_dashboards):
+    """
+    Ambil semua screenshots dengan naming based on group.
+    
+    Returns:
+    - screenshot_map: {group_name: [list of image_paths]}
+    - group_to_ids: {group_name: group_ids_list}
+    """
+    print("\n" + "="*60)
+    print("🔄 [5/5] MENGAMBIL SEMUA SCREENSHOTS")
+    print("="*60)
+    
+    screenshot_map = {}  # {group_name: [image_paths]}
+    group_to_ids = {}    # {group_name: group_ids_list}
+    group_counters = {}  # {group_name: counter} untuk naming
+    
+    total_screenshots = 0
+    
+    for group_name, dashboards in all_dashboards.items():
+        print(f"\n📸 GROUP: {group_name}")
+        print(f"   Dashboards: {len(dashboards)} item")
+        
+        # Cari Group IDs dari mapping
+        group_ids = group_mapping.get(group_name, '')
+        if not group_ids:
+            print(f"   ⚠️ Group '{group_name}' tidak ditemukan di sheet Group - SKIP")
+            continue
+        
+        # Group ID bisa multiple, dipisah dengan ;
+        group_ids_list = [gid.strip() for gid in group_ids.split(';') if gid.strip()]
+        group_to_ids[group_name] = group_ids_list
+        print(f"   📍 Group IDs: {', '.join(group_ids_list)}")
+        
+        # Initialize counter untuk group ini
+        group_counters[group_name] = 0
+        screenshot_map[group_name] = []
+        
+        # Ambil screenshot untuk setiap dashboard
+        for dash_idx, config in enumerate(dashboards, 1):
+            try:
+                sheet_name = config['sheet']
+                from_range = config['from']
+                to_range = config['to']
+                dashboard_name = config['dashboard_name']
+
+                print(f"\n   📸 [{dash_idx}/{len(dashboards)}] {dashboard_name}")
+                print(f"      Sheet: {sheet_name} | Range: {from_range}:{to_range}")
+
+                ws = wb.Sheets(sheet_name)
+                ws.Activate()
+                time.sleep(0.5)
+
+                range_address = f"{from_range}:{to_range}"
+                selected_range = ws.Range(range_address)
+                selected_range.Select()
+                time.sleep(0.3)
+
+                selected_range.Copy()
+                time.sleep(0.5)
+
+                img = ImageGrab.grabclipboard()
+                if img:
+                    group_counters[group_name] += 1
+                    img = img.crop(img.getbbox())
+
+                    # ✅ NAMING: group_name_counter.jpg (e.g., "IM3_1.jpg", "3ID_2.jpg")
+                    image_filename = f"{group_name}_{group_counters[group_name]}.jpg"
+                    image_path = os.path.join(SCRIPT_DIR, image_filename)
+
+                    img_rgb = img.convert('RGB')
+                    img_rgb.save(image_path, 'JPEG', quality=95)
+                    screenshot_map[group_name].append(image_path)
+                    total_screenshots += 1
+                    print(f"      ✓ Screenshot berhasil: {image_filename} ({img_rgb.size})")
+
+                    excel.SendKeys('{ESCAPE}')
+                else:
+                    print(f"      ⚠️ Clipboard kosong untuk {dashboard_name}")
+                    excel.SendKeys('{ESCAPE}')
+
+            except Exception as e:
+                print(f"      ❌ Error capturing {config['dashboard_name']}: {str(e)[:80]}")
+                excel.SendKeys('{ESCAPE}')
+                continue
+        
+        print(f"   ✅ {group_name}: {group_counters[group_name]} screenshot berhasil")
+    
+    print(f"\n✅ Total screenshots: {total_screenshots}")
+    return screenshot_map, group_to_ids
+
+
 def wait_for_connections_refresh(wb, max_wait=150, poll_interval=3):
     """
     ✅ IMPROVED: Polling untuk detect kapan query GCP selesai.
@@ -630,130 +721,123 @@ def refresh_dan_screenshot():
         # Parse Group mapping dari sheet Group
         group_mapping = parse_group_mapping(wb)
 
-        print("\n🔄 [4/5] Membaca dan memproses sheet Caption...")
+        print("\n🔄 [4/5] Membaca konfigurasi dashboard dari semua sheets...")
 
         sheets_to_process = ["Caption", "Caption 2"]
+        all_dashboards = {}  # {group_name: [list of dashboard configs]}
+        all_captions = {}    # {sheet_label: caption_text}
 
+        # STEP 1: Collect semua dashboards dari semua sheets
         for sheet_label in sheets_to_process:
             try:
                 ws_caption = wb.Sheets(sheet_label)
-                print(f"\n{'='*60}")
-                print(f"📄 MEMPROSES SHEET: {sheet_label}")
-                print(f"{'='*60}")
+                print(f"\n📄 Membaca sheet: {sheet_label}")
 
                 capture_config, caption_text = parse_caption_table(ws_caption)
 
                 if not capture_config:
-                    print(f"⚠️ Tidak ada dashboard di sheet {sheet_label}, skip")
+                    print(f"   ⚠️ Tidak ada dashboard di sheet {sheet_label}")
                     continue
 
-                print(f"\n   ✓ {len(capture_config)} dashboard ditemukan")
+                print(f"   ✓ {len(capture_config)} dashboard ditemukan")
+                all_captions[sheet_label] = caption_text
 
-                # Group dashboards by consecutive group
-                grouped_dashboards = group_dashboards_by_consecutive_group(capture_config)
-                print(f"   📊 Dikelompokkan menjadi {len(grouped_dashboards)} group")
-                
-                for group_idx, group_data in enumerate(grouped_dashboards, 1):
-                    group_name = group_data['group']
-                    dashboards = group_data['dashboards']
-                    
-                    print(f"\n{'='*60}")
-                    print(f"📸 GROUP {group_idx}/{len(grouped_dashboards)}: {group_name}")
-                    print(f"   Dashboards: {len(dashboards)} item")
-                    print(f"{'='*60}")
-                    
-                    # Cari Group IDs dari mapping
-                    group_ids = group_mapping.get(group_name, '')
-                    if not group_ids:
-                        print(f"   ⚠️ Group '{group_name}' tidak ditemukan di sheet Group")
-                        continue
-                    
-                    # Group ID bisa multiple, dipisah dengan ;
-                    group_ids_list = [gid.strip() for gid in group_ids.split(';') if gid.strip()]
-                    print(f"   📍 Akan dikirim ke: {', '.join(group_ids_list)}")
-                    
-                    # Screenshot semua dashboard dalam group ini
-                    print(f"\n🔄 [5/5] Screenshot untuk group: {group_name}...")
-                    time.sleep(1)
-                    
-                    screenshot_count = 0
-                    for dash_idx, config in enumerate(dashboards, 1):
-                        try:
-                            sheet_name = config['sheet']
-                            from_range = config['from']
-                            to_range = config['to']
-                            dashboard_name = config['dashboard_name']
+                # Debug: print caption info
+                if caption_text:
+                    print(f"   📝 Caption tersimpan: {len(caption_text)} karakter")
+                else:
+                    print(f"   ⚠️ Caption kosong untuk sheet {sheet_label}")
 
-                            print(f"\n📸 [{dash_idx}/{len(dashboards)}] {dashboard_name}")
-                            print(f"   Sheet: {sheet_name} | Range: {from_range}:{to_range}")
-
-                            ws = wb.Sheets(sheet_name)
-                            ws.Activate()
-                            time.sleep(0.5)
-
-                            range_address = f"{from_range}:{to_range}"
-                            selected_range = ws.Range(range_address)
-                            selected_range.Select()
-                            time.sleep(0.3)
-
-                            selected_range.Copy()
-                            time.sleep(0.5)
-
-                            img = ImageGrab.grabclipboard()
-                            if img:
-                                screenshot_count += 1
-                                img = img.crop(img.getbbox())
-
-                                enhancer_sharpness = ImageEnhance.Sharpness(img)
-                                img = enhancer_sharpness.enhance(1.5)
-
-                                enhancer_contrast = ImageEnhance.Contrast(img)
-                                img = enhancer_contrast.enhance(1.2)
-
-                                enhancer_brightness = ImageEnhance.Brightness(img)
-                                img = enhancer_brightness.enhance(1.05)
-
-                                image_path = os.path.join(SCRIPT_DIR, f"temp_report_{screenshot_count}.png")
-
-                                img_rgb = img.convert('RGB')
-                                img_rgb.save(image_path, 'JPEG', quality=95, optimize=True)
-                                print(f"   ✓ Screenshot berhasil: {os.path.basename(image_path)} ({img_rgb.size})")
-
-                                excel.SendKeys('{ESCAPE}')
-                            else:
-                                print(f"   ⚠️ Clipboard kosong untuk {dashboard_name}")
-                                excel.SendKeys('{ESCAPE}')
-
-                        except Exception as e:
-                            print(f"   ❌ Error capturing {config['dashboard_name']}: {str(e)[:80]}")
-                            excel.SendKeys('{ESCAPE}')
-                            continue
-
-                    print(f"\n✅ Group {group_name}: {screenshot_count} screenshot berhasil")
-
-                    if screenshot_count == 0:
-                        print(f"⚠️ Tidak ada screenshot untuk group {group_name}")
-                        continue
-
-                    # Simpan caption dan group IDs ke file konfigurasi untuk wa_bot
-                    save_send_config(caption_text, group_ids_list, screenshot_count)
-
-                    print("\n" + "="*60)
-                    print(f"📱 MENGIRIM GROUP: {group_name}")
-                    print("="*60)
-                    send_wa_report()
-
-                    cleanup_screenshot_files()
-
-                print(f"\n✅ Sheet {sheet_label}: semua group selesai diproses!")
+                # Group dashboards by group name
+                for config in capture_config:
+                    group_name = config.get('group', 'Default')
+                    if group_name not in all_dashboards:
+                        all_dashboards[group_name] = []
+                    all_dashboards[group_name].append(config)
 
             except Exception as e:
-                print(f"⚠️ Error memproses sheet {sheet_label}: {str(e)[:80]}")
+                print(f"   ⚠️ Error membaca sheet {sheet_label}: {str(e)[:80]}")
                 continue
 
+        if not all_dashboards:
+            print("\n⚠️ Tidak ada dashboard ditemukan di semua sheets")
+            return
+
+        print(f"\n✅ Total group ditemukan: {len(all_dashboards)}")
+        for group_name, dashboards in all_dashboards.items():
+            print(f"   - {group_name}: {len(dashboards)} dashboard")
+
+        # STEP 2: Ambil semua screenshots dengan naming based on group
+        screenshot_map, group_to_ids = take_all_screenshots(wb, excel, group_mapping, all_dashboards)
+
+        if not screenshot_map or all(len(images) == 0 for images in screenshot_map.values()):
+            print("\n❌ Tidak ada screenshot yang berhasil diambil")
+            return
+
+        # Validasi jumlah dashboard vs screenshot
+        total_dashboards = sum(len(dashboards) for dashboards in all_dashboards.values())
+        total_screenshots = sum(len(images) for images in screenshot_map.values())
+        print("\n📊 Validasi total dashboard vs screenshot:")
+        print(f"   - Total dashboard: {total_dashboards}")
+        print(f"   - Total screenshot: {total_screenshots}")
+
+        if total_dashboards != total_screenshots:
+            print("\n❌ VALIDASI GAGAL: Jumlah screenshot tidak sesuai jumlah dashboard")
+            for group_name in sorted(all_dashboards.keys()):
+                dashboards_count = len(all_dashboards[group_name])
+                screenshot_count = len(screenshot_map.get(group_name, []))
+                print(f"   - Group {group_name}: dashboard={dashboards_count}, screenshot={screenshot_count}")
+            print("\n⚠️ Proses kirim WA dibatalkan. Periksa kembali konfigurasi sheet Caption/Caption 2.")
+            return
+
+        print("\n✅ Validasi berhasil: jumlah screenshot sesuai total dashboard")
+
+        # STEP 3: Send per group (images dulu, baru caption)
         print("\n" + "="*60)
-        print("✅ SEMUA SHEET SELESAI DIPROSES!")
+        print("📱 MENGIRIM KE GRUP")
         print("="*60)
+
+        for group_name, image_paths in screenshot_map.items():
+            if not image_paths:
+                print(f"\n⚠️ Group '{group_name}' tidak ada images - SKIP")
+                continue
+
+            group_ids_list = group_to_ids.get(group_name, [])
+            if not group_ids_list:
+                print(f"\n⚠️ Group '{group_name}' tidak ada Group IDs - SKIP")
+                continue
+
+            print(f"\n{'='*60}")
+            print(f"📍 GROUP: {group_name}")
+            print(f"   Images: {len(image_paths)}")
+            print(f"   Target: {', '.join(group_ids_list)}")
+            print(f"{'='*60}")
+
+            # Ambil caption dari sheet Caption (utama)
+            caption_text = all_captions.get('Caption', '')
+            if not caption_text:
+                # Fallback ke Caption 2 jika Caption kosong
+                caption_text = all_captions.get('Caption 2', '')
+            
+            print(f"   📝 Caption untuk kirim: {len(caption_text) if caption_text else 0} karakter")
+            if not caption_text:
+                print(f"      ⚠️ Catatan: all_captions keys = {list(all_captions.keys())}")
+
+            
+            # Simpan caption ke file untuk referensi
+            if caption_text:
+                save_caption_to_file(caption_text)
+
+            # Save config dan send
+            save_send_config_with_images(caption_text, group_ids_list, image_paths)
+
+            print(f"\n🔄 Mengirim ke WhatsApp...")
+            send_wa_report()
+
+            print(f"✅ Group {group_name} selesai!")
+
+        # STEP 4: Cleanup semua file screenshot
+        cleanup_all_screenshot_files()
 
     finally:
         try:
@@ -800,6 +884,81 @@ def send_wa_report():
         raise
 
 
+def save_send_config_with_images(caption_text, group_ids, image_paths):
+    """Simpan konfigurasi untuk wa_bot.js dengan list image paths"""
+    try:
+        send_config = {
+            'group_ids': group_ids,
+            'caption': caption_text if caption_text and caption_text.strip() else '',
+            'image_files': image_paths  # ✅ BARU: list of image paths
+        }
+        
+        config_file = os.path.join(SCRIPT_DIR, 'send_config.json')
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(send_config, f, ensure_ascii=False, indent=2)
+        
+        print(f"\n📝 Konfigurasi pengiriman disimpan: send_config.json")
+        print(f"   Group IDs: {', '.join(group_ids)}")
+        print(f"   Images: {len(image_paths)} file")
+        if caption_text and caption_text.strip():
+            print(f"   Caption: {len(caption_text)} karakter")
+        
+    except Exception as e:
+        print(f"⚠️ Error menyimpan konfigurasi pengiriman: {str(e)}")
+
+
+def save_caption_to_file(caption_text):
+    """Simpan caption ke file Caption.txt"""
+    try:
+        caption_file = os.path.join(SCRIPT_DIR, 'Caption.txt')
+        with open(caption_file, 'w', encoding='utf-8') as f:
+            f.write(caption_text)
+        print(f"   ✓ Caption disimpan: Caption.txt ({len(caption_text)} karakter)")
+    except Exception as e:
+        print(f"   ⚠️ Error simpan caption: {str(e)}")
+
+
+def cleanup_all_screenshot_files():
+    """Hapus semua file screenshot jpg dan temp files"""
+    try:
+        print("\n🗑️ Membersihkan file screenshot temporary...")
+
+        # Hapus semua jpg files (hasil screenshot)
+        jpg_files = glob.glob(os.path.join(SCRIPT_DIR, "*.jpg"))
+        for file in jpg_files:
+            try:
+                os.remove(file)
+                print(f"   ✓ Dihapus: {os.path.basename(file)}")
+            except Exception as e:
+                print(f"   ⚠️ Gagal hapus {os.path.basename(file)}: {str(e)}")
+
+        # Hapus backup/legacy files jika ada
+        legacy_files = glob.glob(os.path.join(SCRIPT_DIR, "temp_report_*.png"))
+        for file in legacy_files:
+            try:
+                os.remove(file)
+                print(f"   ✓ Dihapus: {os.path.basename(file)}")
+            except Exception as e:
+                print(f"   ⚠️ Gagal hapus {os.path.basename(file)}: {str(e)}")
+
+        # Hapus config
+        send_config_file = os.path.join(SCRIPT_DIR, "send_config.json")
+        if os.path.exists(send_config_file):
+            os.remove(send_config_file)
+            print(f"   ✓ Dihapus: send_config.json")
+
+        # Hapus Caption.txt jika ada
+        caption_file = os.path.join(SCRIPT_DIR, "Caption.txt")
+        if os.path.exists(caption_file):
+            os.remove(caption_file)
+            print(f"   ✓ Dihapus: Caption.txt")
+
+        print("✅ Cleanup selesai!")
+
+    except Exception as e:
+        print(f"⚠️ Error saat cleanup: {str(e)}")
+
+
 def save_send_config(caption_text, group_ids, screenshot_count):
     """Simpan konfigurasi untuk wa_bot.js: caption text, group IDs, dan jumlah screenshots"""
     try:
@@ -821,27 +980,6 @@ def save_send_config(caption_text, group_ids, screenshot_count):
         
     except Exception as e:
         print(f"⚠️ Error menyimpan konfigurasi pengiriman: {str(e)}")
-
-
-def cleanup_screenshot_files():
-    """Hapus semua file screenshot temporary setelah dikirim"""
-    try:
-        print("\n🗑️ Membersihkan file screenshot temporary...")
-
-        screenshot_files = glob.glob(os.path.join(SCRIPT_DIR, "temp_report_*.png"))
-        for file in screenshot_files:
-            os.remove(file)
-            print(f"   ✓ Dihapus: {os.path.basename(file)}")
-
-        send_config_file = os.path.join(SCRIPT_DIR, "send_config.json")
-        if os.path.exists(send_config_file):
-            os.remove(send_config_file)
-            print(f"   ✓ Dihapus: send_config.json")
-
-        print("✅ Cleanup selesai!")
-
-    except Exception as e:
-        print(f"⚠️ Error saat cleanup: {str(e)}")
 
 
 if __name__ == "__main__":

@@ -1,11 +1,9 @@
 const pino = require('pino');
 const fs = require('fs');
 const qrcode = require('qrcode-terminal');
-const sharp = require('sharp');
 require('dotenv').config();
 
 const CONFIG_FILE = 'config.json';
-const IMAGE_FILE = 'temp_report.png';
 const NOTIF_NUMBER = process.env.NOTIF_NUMBER; // Ambil dari .env
 
 // Suppress Baileys debug output - intercept pada level stdout/stderr
@@ -95,7 +93,7 @@ async function connectToWA() {
 
 async function kirimReport(sock) {
     try {
-        // Baca send_config.json untuk mendapatkan group IDs dan caption
+        // Baca send_config.json untuk mendapatkan group IDs, caption, dan image files
         let sendConfig = {};
         try {
             sendConfig = JSON.parse(fs.readFileSync('send_config.json', 'utf8'));
@@ -108,6 +106,9 @@ async function kirimReport(sock) {
         const groupIds = Array.isArray(sendConfig.group_ids) ? sendConfig.group_ids : [sendConfig.group_ids];
         const captionText = sendConfig.caption || '';
         const isError = sendConfig.is_error || false;
+        
+        // ✅ BARU: image_files list untuk mengirim specific files
+        let imageFiles = sendConfig.image_files || [];
         
         // 🔴 CEK JIKA INI ERROR MESSAGE
         if (isError) {
@@ -127,16 +128,20 @@ async function kirimReport(sock) {
         
         console.log(`\n📍 Target grup: ${groupIds.join(', ')}`);
         
-        // Cari semua file temp_report_*.png
-        const files = fs.readdirSync('.')
-            .filter(file => file.match(/^temp_report_\d+\.png$/))
-            .sort((a, b) => {
-                const numA = parseInt(a.match(/\d+/)[0]);
-                const numB = parseInt(b.match(/\d+/)[0]);
-                return numA - numB;
-            });
+        // ✅ Jika image_files tidak disediakan, cari legacy temp_report_*.png files
+        if (imageFiles.length === 0) {
+            console.log('   [INFO] image_files kosong, mencari temp_report_*.png...');
+            const files = fs.readdirSync('.')
+                .filter(file => file.match(/^temp_report_\d+\.png$/))
+                .sort((a, b) => {
+                    const numA = parseInt(a.match(/\d+/)[0]);
+                    const numB = parseInt(b.match(/\d+/)[0]);
+                    return numA - numB;
+                });
+            imageFiles = files;
+        }
         
-        if (files.length === 0) {
+        if (imageFiles.length === 0) {
             console.log(`[!] Tidak ada file screenshot yang ditemukan.`);
             
             // Kirim notifikasi error
@@ -155,47 +160,37 @@ async function kirimReport(sock) {
             console.log(`\n=== Mengirim ke grup: ${jid} ===`);
             
             try {
-                // Kirim semua screenshot ke grup ini
-                for (const file of files) {
+                // ✅ STEP 1: Kirim semua IMAGES dulu
+                console.log(`\n📸 Mengirim ${imageFiles.length} screenshot...`);
+                for (const file of imageFiles) {
                     try {
                         console.log(`  Memproses & mengirim screenshot: ${file}...`);
                         
-                        // OPTIMASI KUALITAS GAMBAR SEBELUM DIKIRIM
                         let imageBuffer = fs.readFileSync(file);
                         
-                        const optimizedBuffer = await sharp(imageBuffer)
-                            .jpeg({ 
-                                quality: 95,
-                                progressive: true,
-                                optimizeScans: true,
-                                mozjpeg: true
-                            })
-                            .toBuffer();
-                        
                         await sock.sendMessage(jid, { 
-                            image: optimizedBuffer,
+                            image: imageBuffer,
                             caption: undefined
                         });
                         
-                        const originalSize = (imageBuffer.length / 1024).toFixed(2);
-                        const optimizedSize = (optimizedBuffer.length / 1024).toFixed(2);
-                        console.log(`    ✓ Ukuran: ${originalSize}KB → ${optimizedSize}KB`);
+                        const fileSize = (imageBuffer.length / 1024).toFixed(2);
+                        console.log(`    ✓ Ukuran file: ${fileSize}KB`);
                         
-                        await new Promise(resolve => setTimeout(resolve, 5000));
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                     } catch (err) {
                         console.error(`  ❌ Error mengirim ${file}: ${err.message}`);
                     }
                 }
                 
-                // Kirim caption setelah semua dashboard
+                // ✅ STEP 2: Kirim CAPTION setelah semua images
                 if (captionText && captionText.trim()) {
                     try {
-                        console.log(`  Mengirim caption...`);
+                        console.log(`\n📝 Mengirim caption...`);
                         await sock.sendMessage(jid, { 
                             text: captionText
                         });
                         
-                        await new Promise(resolve => setTimeout(resolve, 5000));
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                     } catch (err) {
                         console.error(`  ❌ Error mengirim caption: ${err.message}`);
                     }
